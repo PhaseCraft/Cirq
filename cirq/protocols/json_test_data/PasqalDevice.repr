@@ -1,3 +1,0 @@
-cirq.pasqal.PasqalDevice(
-    qubits=[cirq.NamedQubit('q0')]
-)
