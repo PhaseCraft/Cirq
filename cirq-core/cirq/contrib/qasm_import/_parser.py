@@ -934,7 +934,7 @@ class QasmParser:
         """gate_op :  ID '(' params ')' qargs"""
         self._resolve_gate_operation(args=p[5], gate=p[1], p=p, params=p[3])
 
-    def p_gate_op_with_params(self, p):
+    def p_gphase_gate(self, p):
         """gate_op :  GPHASE '(' params ')' ';'"""
         if self.version != "3.0":
             raise QasmException(
