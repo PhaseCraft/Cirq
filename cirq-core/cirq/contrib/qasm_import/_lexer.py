@@ -38,6 +38,7 @@ class QasmLexer:
         'gate': 'GATE',
         'if': 'IF',
         'pi': 'PI',
+        "gphase": "GPHASE",
     }
 
     tokens = [

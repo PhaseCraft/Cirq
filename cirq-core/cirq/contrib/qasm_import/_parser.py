@@ -24,7 +24,7 @@ import numpy as np
 import sympy
 from ply import yacc
 
-from cirq import Circuit, CircuitOperation, CX, FrozenCircuit, NamedQubit, ops, value
+from cirq import Circuit, CircuitOperation, CX, FrozenCircuit, NamedQubit, ops, value, global_phase_operation
 from cirq.circuits.qasm_output import QasmUGate
 from cirq.contrib.qasm_import._lexer import QasmLexer
 from cirq.contrib.qasm_import.exception import QasmException
@@ -887,7 +887,6 @@ class QasmParser:
         """new_openqasm_2_0_reg : QREG ID '[' NATURAL_NUMBER ']' ';'
         | CREG ID '[' NATURAL_NUMBER ']' ';'
         """
-        # QREG ID '[' NATURAL_NUMBER ']' ';'
         name, length = p[2], p[4]
         self._validate_reg(p, name, length)
         if p[1] == "qreg":
@@ -914,7 +913,7 @@ class QasmParser:
         self._validate_reg(p, name, length)
         if self.version != "3.0":
             raise QasmException(
-                f"Version mismatch, an OpenQASM 3.0 register encoundered on line {p.lineno(2)} while parsing OpenQASM 2.0"
+                f"Version mismatch, an OpenQASM 3.0 register encountered on line {p.lineno(2)} while parsing OpenQASM 2.0"
             )
         if p[1] == "qubit":
             self.qregs[name] = length
@@ -925,6 +924,7 @@ class QasmParser:
     # gate operations
     # gate_op : ID qargs
     #         | ID ( params ) qargs
+    #         | GPHASE ( params ) ;
 
     def p_gate_op_no_params(self, p):
         """gate_op :  ID qargs"""
@@ -933,6 +933,23 @@ class QasmParser:
     def p_gate_op_with_params(self, p):
         """gate_op :  ID '(' params ')' qargs"""
         self._resolve_gate_operation(args=p[5], gate=p[1], p=p, params=p[3])
+
+    def p_gate_op_with_params(self, p):
+        """gate_op :  GPHASE '(' params ')' ';'"""
+        if self.version != "3.0":
+            raise QasmException(
+                f"Version mismatch, an OpenQASM 3.0 `gphase` gate encountered "
+                f"on line {p.lineno(2)} while parsing OpenQASM 2.0"
+            )
+        if len(p[3]) != 1:
+            raise QasmException(
+                f"gphase takes 1 parameter, "
+                f"got: {len(p[3])}, at line {p.lineno(3)}"
+            )
+        phase = p[3][0]
+        # need to use exp here due to different conventions in parameter meaning
+        exp = sympy.exp if isinstance(phase, sympy.Expr) else np.exp
+        p[0] = global_phase_operation(exp(1j * p[3][0]))
 
     def _resolve_gate_operation(
         self, args: list[list[ops.Qid]], gate: str, p: Any, params: list[value.TParamVal]

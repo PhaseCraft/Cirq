@@ -1935,6 +1935,58 @@ def test_single_qubit_gates(qasm_gate: str, cirq_gate: cirq.Gate) -> None:
     cq.assert_qiskit_parsed_qasm_consistent_with_unitary(qasm, cirq.unitary(expected_circuit))
 
 
+def test_gphase_gate_with_too_much_parameters() -> None:
+    qasm = f"""OPENQASM 3.0;
+     qreg q[2];
+     gphase(pi/2, 1.0);
+    """
+    parser = QasmParser()
+
+    with pytest.raises(QasmException, match=rf".*gphase.* takes 1 arg.*got.*2.*line 3"):
+        parser.parse(qasm)
+
+
+def test_gphase_gate() -> None:
+    qasm = f"""OPENQASM 3.0;
+     qreg q[2];
+     gphase(pi/2);
+    """
+
+    parser = QasmParser()
+
+    q0 = cirq.NamedQubit('q_0')
+    q1 = cirq.NamedQubit('q_1')
+
+    expected_circuit = Circuit([cirq.global_phase_operation(np.exp(1j*np.pi/2))])
+
+    parsed_qasm = parser.parse(qasm)
+
+    assert parsed_qasm.supportedFormat
+
+    ct.assert_same_circuits(parsed_qasm.circuit, expected_circuit)
+    assert parsed_qasm.qregs == {'q': 2}
+
+
+# def test_gphase_gate_with_control() -> None:
+#     qasm = f"""OPENQASM 3.0;
+#      qreg q[1];
+#      ctrl @ gphase(3 / pi) q[1];
+#     """
+
+#     parser = QasmParser()
+
+#     q0 = cirq.NamedQubit('q_0')
+
+#     expected_circuit = Circuit([QasmUGate(0, 0, 3 / np.pi)(q0)])
+
+#     parsed_qasm = parser.parse(qasm)
+
+#     assert parsed_qasm.supportedFormat
+
+#     ct.assert_same_circuits(parsed_qasm.circuit, expected_circuit)
+#     assert parsed_qasm.qregs == {'q': 2}
+
+
 def test_non_bit_type_in_measurement() -> None:
     qasm = """OPENQASM 3.0;
      qubit q;
