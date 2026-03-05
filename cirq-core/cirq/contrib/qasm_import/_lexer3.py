@@ -33,6 +33,7 @@ class Qasm3Lexer:
         'qreg': 'QREG',
         'bit': 'BIT',
         'angle': 'ANGLE',
+        'float': 'FLOAT',
         'creg': 'CREG',
         'measure': 'MEASURE',
         'reset': 'RESET',
@@ -40,6 +41,7 @@ class Qasm3Lexer:
         'gphase': 'GPHASE',
         'ctrl': 'CTRL',
         'pi': 'PI',
+        'input': 'INPUT',
     }
 
     tokens = [

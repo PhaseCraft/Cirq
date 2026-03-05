@@ -160,6 +160,7 @@ class RegisterType(StrEnum):
     QUBIT = 'qubit'
     BIT = 'bit'
     ANGLE = 'angle'
+    FLOAT = 'float'
 
 
 @dataclasses.dataclass
@@ -167,54 +168,49 @@ class Register:
     name: str
     type_: RegisterType
     length: int
+    value: int | float | str | complex | None = None # TODO
+    input: bool = False
 
 
 @dataclasses.dataclass
 class QasmRegisters:
-    qubits: dict[str, int] = dataclasses.field(default_factory=dict)
-    bits: dict[str, int] = dataclasses.field(default_factory=dict)
-    angles: dict[str, int] = dataclasses.field(default_factory=dict)
+    """
+    Mapping from register name to register information
+    """
+    _regs: dict[str, Register] = dataclasses.field(default_factory=dict)
 
     @property
     def defined_regs(self) -> list[str]:
-        return self.classical_regs + self.quantum_regs
-        
-    @property
-    def classical_regs(self) -> list[str]:
-        return list(self.bits.keys()) +\
-        list(self.angles.keys())
+        return list(self._regs.keys())
+
+    def _get_name_to_length(self, type_:RegisterType) -> dict[str, int]:
+        return {k:v.length for k, v in self._regs.items() if v.type_ == type_}
     
     @property
-    def quantum_regs(self) -> list[str]:
-        return list(self.qubits.keys())
+    def qubits(self) -> dict[str, int]:
+        return self._get_name_to_length(RegisterType.QUBIT)
+
+    @property
+    def bits(self) -> dict[str, int]:
+       return self._get_name_to_length(RegisterType.BIT)
+
+    @property
+    def angles(self) -> dict[str, int]:
+        return self._get_name_to_length(RegisterType.ANGLE)
     
+    @property
+    def floats(self) -> dict[str, int]:
+        return self._get_name_to_length(RegisterType.FLOAT)
+
     def add_register(self, register: Register, lineno):
         if register.name in self.defined_regs:
             raise QasmException(f"{register.name} is already defined at line {lineno}")
         if register.length == 0:
             raise QasmException(f"Illegal, zero-length register '{register.name}' at line {lineno}")
-        match register.type_:
-            case RegisterType.QUBIT:
-                registers = self.qubits
-            case RegisterType.BIT:
-                registers = self.bits
-            case RegisterType.ANGLE:
-                registers = self.angles
-        registers[register.name] = register.length
+        self._regs[register.name] = register
 
-    def __getitem__(self, name:str)-> Register | None:
-        if name in self.qubits:
-            type_ = RegisterType.QUBIT
-            registers = self.qubits
-        elif name in self.bits:
-            type_ = RegisterType.BIT
-            registers = self.bits
-        elif name in self.angles:
-            type_ = RegisterType.ANGLE
-            registers = self.angles
-        else:
-            return
-        return Register(name, type_, registers[name])
+    def __getitem__(self, name:str)-> Register:
+        return self._regs[name]
 
 
 class Qasm3Parser:
@@ -222,7 +218,7 @@ class Qasm3Parser:
 
     Example:
 
-        qasm = "OPENQASM 2.0; qreg q1[2]; CX q1[0], q1[1];"
+        qasm = "OPENQASM 3.0; include "stdgates.inc"; qubit[2] q1; cx q1[0], q1[1];"
         parsedQasm = QasmParser().parse(qasm)
     """
 
@@ -231,13 +227,14 @@ class Qasm3Parser:
         self.register_stack: list[QasmRegisters] = [QasmRegisters()]
         self.in_global_scope: bool = True
         self.in_gate_or_function_scope: bool = False
+        self.in_gate_call_parameters_list: bool = False
         self.gate_set: dict[str, CustomGate | QasmGateStatement] = {**self.basic_gates}
         self.parser = yacc.yacc(module=self, debug=False, write_tables=False)
         self.lexer = Qasm3Lexer()
         self.stdgatesinc = False
         self.supported_format = False
         self.parsedQasm: Qasm | None = None
-        self.qubits: dict[str, ops.Qid] = {} # TODO could move into regs
+        self.qubits: dict[str, ops.Qid] = {}
 
         self.binary_operators = {
             '+': operator.add,
@@ -450,6 +447,7 @@ class Qasm3Parser:
         | includeStatement
         | oldStyleDeclarationStatement
         | quantumDeclarationStatement
+        | ioDeclarationStatement
         | empty
         """
         p[0] = p[1]
@@ -474,12 +472,17 @@ class Qasm3Parser:
         qreg = p[2]
         p[0] = [ops.ResetChannel().on(qreg[i]) for i in range(len(qreg))]
 
+    def p_gate_call_parameters(self, p):
+        """gate_call_parameters :
+        """
+        self.in_gate_call_parameters_list = True
+
     def p_gateCall_base(self, p):
-        """gateCall : ID '(' expressionList ')'
+        """gateCall : ID '(' gate_call_parameters expressionList ')'
         | ID
         """
         gate_name = p[1]
-        params = [] if len(p) != 5 else p[3]
+        params = [] if len(p) != 6 else p[4]
         if gate_name not in self.gate_set:
             tip = ", did you forget to include stdgates.inc?" if not self.stdgatesinc else ""
             msg = f'Unknown gate "{gate_name}" at line {p.lineno(1)}{tip}'
@@ -575,10 +578,17 @@ class Qasm3Parser:
         self.regs.add_register(reg,  p.lineno(2))
         p[0] = reg
 
+    def p_ioDeclarationStatement(self, p):
+        """ioDeclarationStatement : INPUT scalarType ID SEMI
+        """
+        reg = Register(p[3], *p[2], input=True)
+        self.regs.add_register(reg,  p.lineno(2))
+        p[0] = reg
+
     def p_gateParams_identifierList(self, p):
         """gateParams_identifierList : identifierList"""
         for reg in p[1]:
-            self.regs.add_register(Register(reg, RegisterType.ANGLE, 1),  p.lineno(1))
+            self.regs.add_register(Register(reg, RegisterType.ANGLE, 1, input=True),  p.lineno(1))
         p[0] = p[1]
 
     def p_gateQubits_identifierList(self, p):
@@ -587,7 +597,7 @@ class Qasm3Parser:
             self.regs.add_register(Register(reg, RegisterType.QUBIT, 1), p.lineno(1))
         p[0] = p[1]
 
-    def _gate_def(self, name: str, gate_params: list, gate_qubits: list, lineno: int):
+    def _gate_def(self, name: str, gate_params: list, gate_qubits: list):
         circuit = Circuit(self.circuit).freeze()
         gate_def = CustomGate(name, circuit, gate_params, gate_qubits)
         self.gate_set[name] = gate_def
@@ -609,14 +619,14 @@ class Qasm3Parser:
     def p_gateStatement_params(self, p):
         """gateStatement : enter_custom_gate_scope ID '(' gateParams_identifierList ')' gateQubits_identifierList scope
         """
-        self._gate_def(p[2], p[4], p[6], p.lineno(1))
+        self._gate_def(p[2], p[4], p[6])
 
     def p_gateStatement_no_params(self, p):
         """gateStatement : enter_custom_gate_scope ID '(' ')' gateQubits_identifierList scope
         | enter_custom_gate_scope ID gateQubits_identifierList scope
         """
         offset = len(p) - 6
-        self._gate_def(p[2], [], p[3+offset], p.lineno(1))   
+        self._gate_def(p[2], [], p[3+offset])   
 
     def p_assignmentStatement_measure(self, p):
         """measureAssignmentStatement : indexedIdentifier '=' measureExpression SEMI
@@ -683,9 +693,22 @@ class Qasm3Parser:
     def p_literalExp_id(self, p):
         """expression : ID
         """
-        if p[1] not in self.regs.defined_regs:
+        name = p[1]
+        if name not in self.regs.defined_regs:
             raise QasmException(f"Undefined parameter '{p[1]}' in line {p.lineno(1)}")
-        p[0] = sympy.Symbol(p[1])
+        reg = self.regs[name]
+        if self.in_gate_call_parameters_list and reg.type_ not in [RegisterType.ANGLE, RegisterType.FLOAT]:
+            raise QasmException(
+                f"Parameter of type `{reg.type_}` cannot be used in gate parameter expression in line {p.lineno(1)}."
+                f"Only `float` or `angle` input parameters are supported"
+            )
+        if not(reg.input or reg.value):
+            tip = "Try converting parameter to an input."
+            raise QasmException(f"Parameter cannot be used in an expression in line {p.lineno(1)}. {tip}")
+        if reg.value:
+            p[0] = reg.value # TODO
+        else:
+            p[0] = sympy.Symbol(reg.name)
     
     def p_pi(self, p):
         """expression : PI"""
@@ -752,6 +775,13 @@ class Qasm3Parser:
         """
         length = 1 if len(p) != 3 else p[2]
         p[0] = (RegisterType.ANGLE, length)
+
+    def p_scalarType_float(self, p):
+        """scalarType : FLOAT designator
+        | FLOAT
+        """
+        length = 1 if len(p) != 3 else p[2]
+        p[0] = (RegisterType.FLOAT, length)
 
     def p_qubitType(self, p):
         """qubitType : QUBIT

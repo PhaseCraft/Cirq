@@ -455,11 +455,11 @@ def test_expressions_no_qiskit_support(expr: str) -> None:
         '3 * phi',
     ],
 )
-def test_expressions_with_identifier(expr: str) -> None:
+def test_expressions_with_input_parameter(expr: str) -> None:
     symbol_name = "phi"
     qasm = f"""OPENQASM 3.0;
      qreg q[1];
-     angle[64] {symbol_name};
+     input angle[64] {symbol_name};
      U({expr}, 2 * pi, pi / 2.0) q[0];
 """
 
@@ -492,7 +492,7 @@ def test_gphase_with_identifier() -> None:
     qasm = f"""OPENQASM 3.0;
     include "stdgates.inc";
      qreg q[1];
-     angle[64] phi;
+     input float[64] phi;
      gphase(phi);
      x q[0];
     """
@@ -516,13 +516,37 @@ def test_gphase_with_identifier() -> None:
         cirq.unitary(parsed_qasm_circuit_resolved), cirq.unitary(expected_circuit_resolved), atol=1e-10
     )
     assert parsed_qasm.regs.qubits == {'q': 1}
-    assert parsed_qasm.regs.angles == {'phi': 64}
+    assert parsed_qasm.regs.floats == {'phi': 64}
+
+
+def test_non_input_param_as_gate_param_error() -> None:
+    qasm = """OPENQASM 3.0;
+     qreg q[1];
+     angle[64] phi;
+     U(phi, 2 * pi, pi / 3.0) q[0];
+"""
+    parser = Qasm3Parser()
+
+    with pytest.raises(QasmException, match=r"Parameter cannot be used in an expression in line 4.*"):
+        parser.parse(qasm)
+
+
+def test_bit_param_as_gate_param_error() -> None:
+    qasm = """OPENQASM 3.0;
+     qreg q[1];
+     bit[64] phi;
+     U(phi, 2 * pi, pi / 3.0) q[0];
+"""
+    parser = Qasm3Parser()
+
+    with pytest.raises(QasmException, match=r"Parameter .*`bit` .* in line 4.*"):
+        parser.parse(qasm)
 
 
 def test_identifier_in_function_error() -> None:
     qasm = """OPENQASM 3.0;
      qreg q[1];
-     angle[64] phi;
+     input angle[64] phi;
      U(floor(phi), 2 * pi, pi / 3.0) q[0];
 """
     parser = Qasm3Parser()
